@@ -10,10 +10,10 @@ from dotenv import load_dotenv
 # Carrega variáveis locais se houver um arquivo .env (ignorado no Render)
 load_dotenv()
 
-TOKEN = os.getenv('1536130178986676314')
+TOKEN = os.getenv('TOKEN')
 # Usa 0 como default caso a variável não exista ou esteja incorreta
 try:
-    CANAL_TEXTO_ID = int(os.getenv('1004317299462897737', 0))
+    CANAL_TEXTO_ID = int(os.getenv('CANAL_TEXTO_ID', 0))
     except ValueError:
         CANAL_TEXTO_ID = 0
 
