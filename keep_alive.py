@@ -18,7 +18,7 @@ def home():
             port = int(os.environ.get("PORT", 8080))
             app.run(host='0.0.0.0', port=port)
 
-                def keep_alive():
+  def keep_alive():
                     """Inicia o servidor Flask em uma Thread daemon"""
-                        t = Thread(target=run, daemon=True)
-                            t.start()
+            t = Thread(target=run, daemon=True)
+            t.start()
