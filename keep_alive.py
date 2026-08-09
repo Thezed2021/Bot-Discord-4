@@ -22,3 +22,4 @@ def home():
                     """Inicia o servidor Flask em uma Thread daemon"""
                         t = Thread(target=run, daemon=True)
                             t.start()
+                            
