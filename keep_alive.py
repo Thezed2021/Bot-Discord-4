@@ -15,4 +15,6 @@ def home():
 
         def keep_alive():
             Thread(target=run, daemon=True).start()
+
+            # --- FIM DO ARQUIVO (Copie até esta linha) ---
             
