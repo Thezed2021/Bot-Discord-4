@@ -3,3 +3,4 @@ Flask
 PyNaCl
 davey
 gTTS
+edge-tts
