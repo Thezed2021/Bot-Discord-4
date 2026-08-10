@@ -20,6 +20,9 @@ CANAL_TEXTO_ID = int(_canal_env) if _canal_env.isdigit() else 0
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
+from gtts import gTTS
+import asyncio
+
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -158,6 +161,67 @@ async def pular(ctx):
         await ctx.send("⏭️ Áudio pulado!")
     else:
         await ctx.send("⚠️ Não há nenhum áudio tocando no momento.")
+@bot.event
+async def on_message(message):
+    # Ignora as mensagens que o próprio bot enviar (para ele não falar sozinho)
+        if message.author == bot.user:
+                return
+
+                    # Verifica se o bot está conectado em algum canal de voz
+                        voice_client = message.guild.voice_client
+                            
+                                # Se o bot estiver na call e alguém digitar, ele vai falar!
+                                    if voice_client and voice_client.is_connected():
+                                            # Cria a frase: "Nome disse: mensagem"
+                                                    texto_para_falar = f"{message.author.display_name} disse: {message.content}"
+                                                            
+                                                                    try:
+                                                                                # Transforma o texto em áudio usando o Google (em português)
+                                                                                            tts = gTTS(text=texto_para_falar, lang='pt', tld='com.br')
+                                                                                                        tts.save("mensagem.mp3") # Salva um arquivo mp3 temporário
+
+                                                                                                                    # Espera se o bot já estiver no meio de outra frase
+                                                                                                                                while voice_client.is_playing():
+                                                                                                                                                await asyncio.sleep(1)
+
+                                                                                                                                                            # Toca o áudio na call!
+                                                                                                                                                                        voice_client.play(discord.FFmpegPCMAudio("mensagem.mp3"))
+                                                                                                                                                                                except Exception as e:
+                                                                                                                                                                                            print(f"Erro ao tentar falar: {e}")
+
+                                                                                                                                                                                                # MUITO IMPORTANTE: Essa linha garante que os seus comandos (como !entrar, !limpar) não parem de funcionar!
+                                                                                                                                                                                                    await bot.process_commands(message)
+# Comando para apagar mensagens em massa
+@bot.command(name='limpar', help='Apaga mensagens do chat (Ex: !limpar 10)')
+@commands.has_permissions(manage_messages=True) # Só admins/mods podem usar
+async def limpar(ctx, quantidade: int):
+    await ctx.channel.purge(limit=quantidade + 1) # +1 para apagar o próprio comando
+        mensagem = await ctx.send(f"🧹 {quantidade} mensagens foram apagadas por {ctx.author.mention}!")
+            await asyncio.sleep(5)
+                await mensagem.delete() # Apaga o aviso depois de 5 segundos
+
+                # Comando para expulsar
+                @bot.command(name='kick', help='Expulsa um usuário (Ex: !kick @usuario motivo)')
+                @commands.has_permissions(kick_members=True)
+                async def kick(ctx, membro: discord.Member, *, motivo="Nenhum motivo informado."):
+                    await membro.kick(reason=motivo)
+                        await ctx.send(f"👢 {membro.mention} foi expulso do servidor. Motivo: {motivo}")
+
+                        # Comando para banir
+                        @bot.command(name='ban', help='Bane um usuário (Ex: !ban @usuario motivo)')
+                        @commands.has_permissions(ban_members=True)
+                        async def ban(ctx, membro: discord.Member, *, motivo="Nenhum motivo informado."):
+                            await membro.ban(reason=motivo)
+                                await ctx.send(f"🔨 {membro.mention} foi banido do servidor. Motivo: {motivo}")
+
+                                # Se alguém sem permissão tentar usar, o bot avisa
+                                @limpar.error
+                                @kick.error
+                                @ban.error
+                                async def erro_permissao(ctx, error):
+                                    if isinstance(error, commands.MissingPermissions):
+                                            await ctx.send("❌ Ops! Você não tem permissão para usar este comando de moderação.")
+                                            
 
 @bot.event
 async def on_voice_state_update(member, before, after):
