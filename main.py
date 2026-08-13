@@ -34,7 +34,6 @@ def get_prefix(bot, message):
     config = carregar_config()
     return config.get("servidores", {}).get(str(message.guild.id), {}).get("prefixo", "!")
 
-# Configuração das permissões (Aviso: members e voice_states necessários para o Modo Automático)
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -42,7 +41,6 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
 
-# Mapeamento das vozes da Microsoft
 MAPA_VOZES = {
     2: "pt-BR-AntonioNeural",
     3: "pt-BR-FranciscaNeural",
@@ -50,10 +48,11 @@ MAPA_VOZES = {
     5: "pt-PT-RaquelNeural"
 }
 
-# Filtros do FFmpeg para os efeitos
+# Filtros do FFmpeg corrigidos
 FILTROS = {
     "fina": 'asetrate=44100*1.4,aresample=44100,atempo=1/1.4',
-    "grossa": 'asetrate=44100*0.6,aresample=44100,atempo=1/0.6',
+    "grossa": 'asetrate=44100*0.75,aresample=44100,atempo=1/0.75', # Ajustado para não falhar
+    "grave": 'bass=g=15:f=110:w=0.6', # Equalizador de graves profundos
     "eco": 'aecho=0.8:0.9:1000:0.3',
     "alien": 'chorus=0.7:0.9:55:0.4:0.25:2',
     "estourado": 'acrusher=level_in=8:level_out=18:bits=8:mode=log:aa=1,volume=5',
@@ -72,7 +71,6 @@ async def play_tts(message, texto_original, filtro_global=None):
     user_id = str(message.author.id)
     config_servidor = config.get("servidores", {}).get(guild_id, {})
     
-    # 1. Verifica Bloqueios
     bloqueados = config_servidor.get("bloqueados", {})
     if user_id in bloqueados:
         vencimento = bloqueados[user_id]
@@ -83,50 +81,41 @@ async def play_tts(message, texto_original, filtro_global=None):
             del config["servidores"][guild_id]["bloqueados"][user_id]
             salvar_config(config)
 
-    # 2. Substituições do Dicionário (Gírias)
     dicionario = config_servidor.get("dicionario", {})
     for palavra, traducao in dicionario.items():
         texto_original = re.sub(rf'\b{re.escape(palavra)}\b', traducao, texto_original, flags=re.IGNORECASE)
 
-    # 3. Tratamento de Links
     texto_original = re.sub(r'https?://[^\s]+', 'um link', texto_original)
 
-    # 4. Filtro de Palavrões
     if config_servidor.get("filtro_palavrao", True):
         palavroes = config_servidor.get("palavroes", [])
         for p in palavroes:
             texto_original = re.sub(rf'\b{re.escape(p)}\b', 'BIP', texto_original, flags=re.IGNORECASE)
 
-    # 5. Processamento de Efeitos Parciais (<efeito: texto>)
-    # Separa a string onde houver as tags
     partes = re.split(r'(<[a-zA-Z]+:\s*.*?>)', texto_original)
     fila = []
     
     for p in partes:
         if not p.strip(): continue
-        # Verifica se essa parte é uma tag de efeito
         m = re.match(r'<([a-zA-Z]+):\s*(.*?)>', p)
         if m:
-            fila.append((m.group(2).strip(), m.group(1).lower())) # (Texto afetado, Nome do efeito)
+            fila.append((m.group(2).strip(), m.group(1).lower())) 
         else:
-            fila.append((p.strip(), filtro_global)) # (Texto normal, Efeito Global)
+            fila.append((p.strip(), filtro_global))
 
-    # 6. Fila de espera da call
     while voice_client.is_playing():
         await asyncio.sleep(1)
 
     await message.add_reaction("✅")
 
-    # 7. Geração e Reprodução em Sequência
     escolha_voz = config.get("usuarios", {}).get(user_id, 1)
     
     try:
         for i, (texto_parte, efeito_parte) in enumerate(fila):
             if not texto_parte: continue
             
-            arquivo_audio = f"temp_{guild_id}_{i}.mp3"
+            arquivo_audio = f"temp_{guild_id}_{i}_{int(time.time())}.mp3"
             
-            # Gera o Áudio
             if escolha_voz == 1:
                 tts = gTTS(text=texto_parte, lang='pt', tld='com.br')
                 tts.save(arquivo_audio)
@@ -135,22 +124,17 @@ async def play_tts(message, texto_original, filtro_global=None):
                 communicate = edge_tts.Communicate(texto_parte, voz_edge)
                 await communicate.save(arquivo_audio)
 
-            # Prepara o Filtro
             opcoes_ffmpeg = None
             if efeito_parte in FILTROS:
                 opcoes_ffmpeg = f'-af "{FILTROS[efeito_parte]}"'
             elif efeito_parte: 
-                # Se for um filtro customizado (como a velocidade do !vozvelo)
                 opcoes_ffmpeg = f'-af "{efeito_parte}"'
 
-            # Toca a parte do áudio
             voice_client.play(discord.FFmpegPCMAudio(arquivo_audio, options=opcoes_ffmpeg))
             
-            # Espera essa parte terminar antes de tocar a próxima
             while voice_client.is_playing():
                 await asyncio.sleep(0.5)
                 
-            # Apaga o arquivo temporário
             try: os.remove(arquivo_audio)
             except: pass
 
@@ -159,37 +143,32 @@ async def play_tts(message, texto_original, filtro_global=None):
         await message.add_reaction("❌")
         print(f"Erro TTS: {e}")
 
-# EVENTOS DO BOT
+# --- EVENTOS DO BOT ---
 @bot.event
 async def on_ready():
     print(f'🤖 Bot conectado com sucesso como {bot.user}')
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # Se quem entrou foi um bot, ignora
-    if member.bot: return
+    # Se quem causou a atualização for um bot, ignoramos para não entrar em loop infinito
+    if member.bot: 
+        return
         
-    # Se o membro acabou de entrar em um canal de voz
+    config = carregar_config()
+    guild_id = str(member.guild.id)
+    config_servidor = config.get("servidores", {}).get(guild_id, {})
+    voice_client = member.guild.voice_client
+
+    # 1. ENTRAR SOZINHO (Modo Automático ligado e a pessoa entrou em um canal de voz)
     if before.channel is None and after.channel is not None:
-        config = carregar_config()
-        guild_id = str(member.guild.id)
-        config_servidor = config.get("servidores", {}).get(guild_id, {})
-        
-        # Verifica se o modo automático está ligado (Padrão: Ligado)
         if config_servidor.get("auto_join", True):
-            voice_client = member.guild.voice_client
-            
-            # Se o bot NÃO estiver na call, ele entra
             if not voice_client:
                 await after.channel.connect()
                 
-                # Procura onde mandar o aviso
                 canal_envio = None
                 canais_tts = config_servidor.get("canais_tts", [])
-                if canais_tts:
-                    canal_envio = bot.get_channel(canais_tts[0])
-                if not canal_envio:
-                    canal_envio = member.guild.system_channel
+                if canais_tts: canal_envio = bot.get_channel(canais_tts[0])
+                if not canal_envio: canal_envio = member.guild.system_channel
                 if not canal_envio:
                     for channel in member.guild.text_channels:
                         if channel.permissions_for(member.guild.me).send_messages:
@@ -198,7 +177,19 @@ async def on_voice_state_update(member, before, after):
                             
                 if canal_envio:
                     prefixo = config_servidor.get("prefixo", "!")
-                    await canal_envio.send(f"🤖 **Modo Automático Ativado!**\nEntrei na call automaticamente porque alguém entrou.\nPara desativar o modo automático (para que o bot entre somente quando for chamado) use `{prefixo}modoautomatico off`.")
+                    await canal_envio.send(f"🤖 **Modo Automático Ativado!**\nEntrei na call automaticamente. Para desativar, use `{prefixo}modoautomatico off`.")
+
+    # 2. SAIR SOZINHO (Alguém saiu da call e o bot ficou sozinho lá dentro)
+    if before.channel is not None:
+        # Se o bot está em um canal de voz
+        if voice_client and voice_client.channel:
+            # Conta quantas pessoas que NÃO SÃO BOTS estão no canal
+            membros_humanos = sum(1 for m in voice_client.channel.members if not m.bot)
+            
+            # Se não sobrou nenhum humano, o bot sai
+            if membros_humanos == 0:
+                await asyncio.sleep(2) # Pequeno atraso para garantir que a API atualizou
+                await voice_client.disconnect()
 
 @bot.event
 async def on_message(message):
@@ -442,6 +433,9 @@ async def log(ctx):
     prefixo = get_prefix(bot, ctx.message)
     embed = discord.Embed(title="🚀 Changelog - Update de Luxo", color=discord.Color.gold())
     embed.add_field(name="🆕 Novidades", value=(
+        "• **Auto-Desconectar:** O bot agora sai sozinho se a call ficar vazia.\n"
+        "• **Novo Efeito 'Grave':** Novo filtro de equalizador para voz grossa e profunda.\n"
+        "• **Fix Efeito 'Grossa':** Matemática ajustada para não bugar o áudio.\n"
         "• **Efeitos Parciais:** Digite `<eco: texto>` para aplicar efeitos no meio da frase!\n"
         "• **Modo Automático:** O bot entra na call sozinho se ela estiver vazia.\n"
         "• **Filtro Family Friendly:** Troca palavrões por BIP! Configure a sua lista.\n"
@@ -457,7 +451,7 @@ async def menu(ctx):
     
     embed.add_field(name="⚙️ Sistemas e Canais", value=f"`{p}modoautomatico on/off`\n`{p}setcanal` | `{p}removercanal` | `{p}listacanais`\n`{p}mudarprefixo <novo>`", inline=False)
     
-    embed.add_field(name="🎙️ Voz e Efeitos", value=f"`{p}voz <num>` - Muda voz\n**Ex parcial:** Olá `<eco: mundo>`\n**Ex Global:** `{p}efeito alien Olá`\nEfeitos: `fina, grossa, eco, alien, estourado, radio, fantasma`", inline=False)
+    embed.add_field(name="🎙️ Voz e Efeitos", value=f"`{p}voz <num>` - Muda voz\n**Ex parcial:** Olá `<eco: mundo>`\n**Ex Global:** `{p}efeito alien Olá`\nEfeitos: `fina, grossa, grave, eco, alien, estourado, radio, fantasma`", inline=False)
     
     embed.add_field(name="📖 Dicionário e Palavrões", value=f"`{p}ensinar <palavra> <tradução>`\n`{p}esquecer <palavra>` | `{p}dicionario`\n`{p}ativarpalavrao` | `{p}addpalavrao <palavra>`", inline=False)
     
